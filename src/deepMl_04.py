@@ -1,10 +1,13 @@
 import os
-
+import json
 import keras
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.metrics import confusion_matrix
 
 
 from keras import layers
@@ -25,18 +28,22 @@ Input (28×28×1)
   → Dense(10, Softmax)"""
 
 
-# load the MNIST dataset
-#(X_train, y_train), (X_test, y_test) = tf.keras.datasets.mnist.load_data()
-X_train_cnn = np.load('data/processed/X_train_cnn.npy')
-X_val_cnn   = np.load('data/processed/X_val_cnn.npy')
-y_train     = np.load('data/processed/y_train.npy')
-y_val       = np.load('data/processed/y_val.npy')
+def load_data():
+    # load the MNIST dataset
+    #(X_train, y_train), (X_test, y_test) = tf.keras.datasets.mnist.load_data()
+    X_train_cnn = np.load(f'data/processed/X_train_cnn.npy')
+    X_val_cnn   = np.load('data/processed/X_val_cnn.npy')
+    y_train     = np.load('data/processed/y_train.npy')
+    y_val       = np.load('data/processed/y_val.npy')
+
+    return X_train_cnn, X_val_cnn, y_train, y_val
 
 
-def reshape_and_encode(X_train_cnn, X_val_cnn, y_train, y_val):
+def reshape_and_encode():
     """
     Reshape and one-hot encode the data for CNN.
     """
+    X_train_cnn, X_val_cnn, y_train, y_val = load_data()
     # reshape to (num_samples, 28, 28, 1)
     X_train_cnn_4d = X_train_cnn.reshape(-1, 28, 28, 1)
     X_val_cnn_4d   = X_val_cnn.reshape(-1, 28, 28, 1)
@@ -47,7 +54,7 @@ def reshape_and_encode(X_train_cnn, X_val_cnn, y_train, y_val):
 
     return X_train_cnn_4d, X_val_cnn_4d, y_train_ohe, y_val_ohe
 
-X_train_cnn_4d, X_val_cnn_4d, y_train_ohe, y_val_ohe = reshape_and_encode(X_train_cnn, X_val_cnn, y_train, y_val)
+X_train_cnn_4d, X_val_cnn_4d, y_train_ohe, y_val_ohe = reshape_and_encode()
 
 
 def build_cnn_model(input_shape=(28, 28, 1), num_classes=10):
@@ -159,18 +166,88 @@ def plot_training_history(history):
     print('✅ Saved: artifacts/DeepML/cnn_training_history.png')
 
 
+
+
+#   EXPORTED TO EVALUATE.PY TO AVOID RETRAINING CNN UNNECESSARILY
+#   =======================================================================================================================================================
+def evaluate_cnn_model(cnn_model, X_val_cnn_4d, y_val_ohe):
+    """
+    Evaluate the CNN model on the validation set.
+    """
+    val_loss, val_accuracy = cnn_model.evaluate(X_val_cnn_4d, y_val_ohe, verbose=0)
+    print(f'Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}')
+
+    cnn_preds_proba = cnn_model.predict(X_val_cnn_4d,verbose=0)
+    cnn_preds = np.argmax(cnn_preds_proba, axis=1)
+
+    print(f'\n{"="*30}\n')
+    print(" Model: CNN")
+    print(f" Validation Accuracy: {val_accuracy:.4f}")
+    print(f" Validation Loss: {val_loss:.4f}")
+    print(f" Validation Predictions Shape: {cnn_preds.shape}")
+    # print(f"\n  Classification Report: ")
+    # print(pd.DataFrame(tf.keras.metrics.classification_report(np.argmax(y_val_ohe, axis=1), cnn_preds, output_dict=True)).transpose()   )
+    
+    ## CNN confusion matrix
+    cm = confusion_matrix(np.argmax(y_val_ohe, axis=1), cnn_preds)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, 
+                annot=True, 
+                fmt='d', 
+                cmap='Purples', 
+                xticklabels=range(10), 
+                yticklabels=range(10), 
+                linewidths=0.5, 
+                linecolor='gray',
+                cbar=False)
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
+    plt.tight_layout()
+
+    os.makedirs('artifacts/DeepML', exist_ok=True)
+    cm_save_path ="artifacts/DeepML/cnn_confusion_matrix.png"
+    os.makedirs(os.path.dirname(cm_save_path), exist_ok=True)
+
+    plt.savefig(cm_save_path, dpi=150,bbox_inches='tight')
+    print(f'saved: {cm_save_path}')
+    
+    return val_loss, val_accuracy
+
+
+
 def save_cnn_model(cnn_model):
     """
     Save the trained CNN model.
     """
     os.makedirs('artifacts/DeepML', exist_ok=True)
-    model_save_path = 'artifacts/DeepML/cnn_model.h5'
-    cnn_model.save(model_save_path)
-    print(f'✅ Saved: {model_save_path}')   # to later load model, use keras.models.load_model('artifacts/DeepML/cnn_model.h5')
+    model_save_path = 'artifacts/DeepML/cnn_model.keras'
+    keras.saving.save_model(cnn_model, model_save_path)
+    #cnn_model.save(model_save_path)
+    print(f'✅ Saved: {model_save_path}')   # to later load model, use keras.saving.load_model('artifacts/DeepML/cnn_model.keras')
+
+
+#   EXPORTED TO EVALUATE.PY TO AVOID RETRAINING CNN UNNECESSARILY
+#   =======================================================================================================================================================
+def add_result_to_json(cnn_acc):
+    # load existing json file with results for the classical models
+    all_results = pd.read_json("artifacts/compare/model_comparison.json")
+
+    cnn_rows = pd.DataFrame([{
+        'Model'  : 'Convolutional Neural Network(Deep Learning)',
+        'Accuracy' : round(cnn_acc * 100, 2),
+        'Time(s)' : None
+    }]).set_index('Model')
+
+    new_results = pd.concat([all_results, cnn_rows]).sort_values('Accuracy', ascending=False)
+
+    new_results.to_json("artifacts/compare/model_comparison.json", orient="records", indent=4)
+
 
 
 
 if __name__ == "__main__":
     cnn_model, history = train_cnn_model(X_train_cnn_4d, y_train_ohe, X_val_cnn_4d, y_val_ohe)
     plot_training_history(history)
+    val_loss, val_accuracy = evaluate_cnn_model(cnn_model, X_val_cnn_4d, y_val_ohe)
     save_cnn_model(cnn_model)
+    add_result_to_json(val_accuracy)
