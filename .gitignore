@@ -3,6 +3,7 @@
 *.h5
 *.keras
 *.pkl
+*n.ipynb
 
 .vscode/
 __pycache__/
